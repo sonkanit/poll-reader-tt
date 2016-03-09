@@ -7,6 +7,7 @@
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/features2d.hpp"
+#include "opencv2/photo/photo.hpp"
 #include <iostream>
 #include <fstream>
 #include <stdio.h>
@@ -90,12 +91,21 @@ int main(int argc, char** argv)
 	cropped = rotated(rect);
 	show(cropped);
 
+	//cv::medianBlur(cropped, cropped, 3);
+	//show(cropped);
+
 	/// Erode
-	int erode_size = 3;
-	Mat element = getStructuringElement(cv::MorphShapes::MORPH_ELLIPSE,
+	int dilate_size = 1;
+	int erode_size = 5;
+	Mat element = getStructuringElement(cv::MorphShapes::MORPH_RECT,
+		Size(2 * dilate_size + 1, 2 * dilate_size + 1),
+		Point(-1, -1));
+	cv::dilate(cropped, eroded, element);
+	element = getStructuringElement(cv::MorphShapes::MORPH_ELLIPSE,
 		Size(2 * erode_size + 1, 2 * erode_size + 1),
-		Point(erode_size, erode_size));
-	cv::erode(cropped, eroded, element);
+		Point(-1, -1));
+	show(eroded);
+	cv::erode(eroded, eroded, element);
 	show(eroded);
 
 	/// Blobs Detect
@@ -103,9 +113,11 @@ int main(int argc, char** argv)
 	params.minDistBetweenBlobs = 50.0f;
 	params.filterByInertia = false;
 	params.filterByConvexity = false;
+	params.minConvexity = 0.1;
 	params.filterByColor = false;
 	params.filterByCircularity = false;
-	params.filterByArea = false;
+	params.filterByArea = true;
+	params.minArea = 50;
 	cv::Ptr<cv::SimpleBlobDetector> blobDetector = cv::SimpleBlobDetector::create(params);
 	blobDetector->detect(eroded, keypoints);
 
@@ -186,11 +198,38 @@ void loadTemplate()
 	}
 }
 
+void onMouse(int event, int x, int y, int flags, void* param)
+{
+	Mat* img = (Mat*)param;
+    char text[100];
+    Mat img2, img3;
+
+    img2 = img->clone();
+
+    if (event == CV_EVENT_LBUTTONDOWN)
+    {
+        Vec3b p = img2.at<Vec3b>(y,x);
+        sprintf(text, "R=%d, G=%d, B=%d", p[2], p[1], p[0]);
+    }
+    else if (event == CV_EVENT_RBUTTONDOWN)
+    {
+        cvtColor(*img, img3, CV_BGR2HSV);
+        Vec3b p = img3.at<Vec3b>(y,x);
+        sprintf(text, "H=%d, S=%d, V=%d", p[0], p[1], p[2]);
+    }
+    else
+        sprintf(text, "x=%d, y=%d", x, y);
+
+    putText(img2, text, Point(5,40), FONT_HERSHEY_PLAIN, 1.0, CV_RGB(255,255,255), 1);
+    imshow(main_window, img2);
+}
+
 void show(Mat& img)
 {
 	if (interactive)
 	{
 		imshow(main_window, img);
+		setMouseCallback(main_window, onMouse, &img);
 		waitKey(0);
 	}
 }
@@ -225,7 +264,7 @@ int getChoiceNumber(float x)
 void score()
 {
 	int nQ, nC;
-	scores.resize(questions.size());
+	scores.resize(questions.size(), -1);
 
 	std::sort(keypoints.begin(), keypoints.end(), sortKeypoint);
 	for (size_t i = 0; i < keypoints.size(); i++)
@@ -236,7 +275,7 @@ void score()
 		if (nQ >= 0)
 		{
 			nC = getChoiceNumber(kp.pt.x);
-			scores[nQ] = nC;
+			scores[nQ] = (scores[nQ] > 0) ? -1 : nC;
 		}
 	}
 
