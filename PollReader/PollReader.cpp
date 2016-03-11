@@ -113,11 +113,14 @@ int main(int argc, char** argv)
 	params.minDistBetweenBlobs = 50.0f;
 	params.filterByInertia = false;
 	params.filterByConvexity = false;
-	params.minConvexity = 0.1;
+	params.filterByCircularity = true;
 	params.filterByColor = false;
-	params.filterByCircularity = false;
 	params.filterByArea = true;
+	params.minConvexity = 0.1;
 	params.minArea = 50;
+	params.maxArea = 800;
+	params.minCircularity = 0.5;
+	//params.minThreshold = 120.0;
 	cv::Ptr<cv::SimpleBlobDetector> blobDetector = cv::SimpleBlobDetector::create(params);
 	blobDetector->detect(eroded, keypoints);
 
@@ -220,7 +223,8 @@ void onMouse(int event, int x, int y, int flags, void* param)
     else
         sprintf(text, "x=%d, y=%d", x, y);
 
-    putText(img2, text, Point(5,40), FONT_HERSHEY_PLAIN, 1.0, CV_RGB(255,255,255), 1);
+	cv::rectangle(img2, Rect(5, 20, 400, 100), CV_RGB(0,0,0), CV_FILLED);
+    cv::putText(img2, text, Point(5,40), FONT_HERSHEY_PLAIN, 1.8, CV_RGB(255,255,255), 1.8);
     imshow(main_window, img2);
 }
 
