@@ -31,11 +31,17 @@ std::vector<int> questions;
 std::vector<int> scores;
 
 /// Function header
-void operation(int, void*);
 void show(Mat& img);
 void score();
 void loadTemplate();
 void report();
+
+bool sortLine(cv::Vec4f a, cv::Vec4f b)
+{
+	float lengthSqrA = (a[2] - a[0])*(a[2] - a[0]) + (a[3] - a[1])*(a[3] - a[1]);
+	float lengthSqrB = (b[2] - b[0])*(b[2] - b[0]) + (b[3] - b[1])*(b[3] - b[1]);
+	return lengthSqrA > lengthSqrB;
+}
 
 /**
 * @function main
@@ -54,7 +60,7 @@ int main(int argc, char** argv)
 	interactive = argc == 5 ? true: false;
 
 	/// Load Template
-	loadTemplate();
+	//loadTemplate();
 
 	/// Create Window
 	if (interactive)
@@ -68,31 +74,88 @@ int main(int argc, char** argv)
 
 	/// Detect Skew angle
 	cv::threshold(gray, bw, iThreshold, 255.0, THRESH_BINARY_INV);
-	std::vector<cv::Vec4f> lines;
+	std::vector<cv::Vec4f> lines, longLines;
 	cv::HoughLinesP(bw, lines, 1, CV_PI / 180, iThreshold, src.cols / 2, 30);
 	double angle = 0.0;
 	unsigned nb_lines = lines.size();
+	std::sort(lines.begin(), lines.end(), sortLine);
+	
 	for (unsigned i = 0; i < nb_lines; ++i)
 	{
-		cv::line(src, cv::Point(lines[i][0], lines[i][1]), cv::Point(lines[i][2], lines[i][3]), cv::Scalar(255, 0, 0));
-		angle += atan2((double)lines[i][3] - lines[i][1], (double)lines[i][2] - lines[i][0]);
+		cv::Vec4f line = lines[i];
+		if (i < 40 && line[1] < 500)
+		{
+			longLines.push_back(line);
+		}
+		cv::Scalar color = cv::Scalar(255, 0, 0);
+		cv::line(src, cv::Point(line[0], line[1]), cv::Point(line[2], line[3]), color);
+		angle += atan2((double)line[3] - line[1], (double)line[2] - line[0]);
 	}
 	angle /= nb_lines; // mean angle, in radians.
+	std::sort(longLines.begin(), longLines.end(), [](cv::Vec4f a, cv::Vec4f b)->bool {return a[1] < b[1]; });
+	cv::Vec4f theLine = longLines[longLines.size() / 2];
+	cv::Scalar color = cv::Scalar(0, 0, 255);
+	cv::line(src, cv::Point(theLine[0], theLine[1]), cv::Point(theLine[2], theLine[3]), color, 5);
 	show(src);
 
 	/// Deskew
 	Mat rM = cv::getRotationMatrix2D(cv::Point2f(0, 0), angle/CV_PI*180.0, 1.0);
 	Mat rotated;
 	cv::warpAffine(bw, rotated, rM, cv::Size(src.cols, src.rows));
+	cv::warpAffine(gray, gray, rM, cv::Size(src.cols, src.rows));
 	show(rotated);
 
+	/// Calculate Cropping Area
+	vector<Vec3f> circles, choiceCircles;
+	GaussianBlur(gray, gray, Size(9, 9), 2, 2);
+	HoughCircles(gray, circles, CV_HOUGH_GRADIENT, 1, 10, 100, 40, 10, 20);
+	for (size_t i = 0; i < circles.size(); i++)
+	{
+		if (circles[i][1] > theLine[1] + 150)
+		{
+			choiceCircles.push_back(circles[i]);
+		}
+	}
+	std::sort(choiceCircles.begin(), choiceCircles.end(), [](cv::Vec3f a, cv::Vec3f b)->int {return a[0] < b[0]; });
+	float minX = choiceCircles[0][0] - 30;
+	float maxX = choiceCircles[choiceCircles.size() - 1][0] + 20;
+	float currentX = 0.0f;
+	float prevX = minX;
+	choices.clear();
+	for (size_t i = 0; i < choiceCircles.size(); i++)
+	{
+		cv::Vec3f c = choiceCircles[i];
+		float x = c[0];
+		if (x > currentX + 10)
+		{
+			prevX = x + x - prevX;
+			choices.push_back(prevX - minX);
+		}
+		currentX = x;
+	}
+
+	std::sort(choiceCircles.begin(), choiceCircles.end(), [](cv::Vec3f a, cv::Vec3f b)->int {return a[1] < b[1]; });
+	float minY = choiceCircles[0][1] - 20;
+	float maxY = choiceCircles[choiceCircles.size() - 1][1] + 20;
+	float currentY = 0.0f;
+	float prevY = minY;
+	questions.clear();
+	for (size_t i = 0; i < choiceCircles.size(); i++)
+	{
+		cv::Vec3f c = choiceCircles[i];
+		float y = c[1];
+		if (y > currentY + 10)
+		{
+			prevY = y + y - prevY;
+			questions.push_back(prevY - minY);
+		}
+		currentY = y;
+	}
+
 	/// Crop
-	cv::Rect rect(area[0], area[1], area[2], area[3]);
+	cv::Rect rect(minX, minY, maxX - minX, maxY - minY);
 	cropped = rotated(rect);
 	show(cropped);
-
-	//cv::medianBlur(cropped, cropped, 3);
-	//show(cropped);
 
 	/// Erode
 	int dilate_size = 1;
@@ -113,13 +176,13 @@ int main(int argc, char** argv)
 	params.minDistBetweenBlobs = 50.0f;
 	params.filterByInertia = false;
 	params.filterByConvexity = false;
-	params.filterByCircularity = true;
+	params.filterByCircularity = false;
 	params.filterByColor = false;
 	params.filterByArea = true;
 	params.minConvexity = 0.1;
 	params.minArea = 50;
 	params.maxArea = 800;
-	params.minCircularity = 0.5;
+	//params.minCircularity = 0.5;
 	//params.minThreshold = 120.0;
 	cv::Ptr<cv::SimpleBlobDetector> blobDetector = cv::SimpleBlobDetector::create(params);
 	blobDetector->detect(eroded, keypoints);
@@ -135,12 +198,12 @@ int main(int argc, char** argv)
 		for (size_t i = 0; i < choices.size(); i++)
 		{
 			float x = choices[i];
-			cv::line(result, cv::Point(x, 0), cv::Point(x, area[3]), cv::Scalar(255, 255, 255, 255), 3);
+			cv::line(result, cv::Point(x, 0), cv::Point(x, maxY - minY), cv::Scalar(255, 255, 255, 255), 3);
 		}
 		for (size_t i = 0; i < questions.size(); i++)
 		{
 			float y = questions[i];
-			cv::line(result, cv::Point(0, y), cv::Point(area[2], y), cv::Scalar(255, 255, 255, 255), 3);
+			cv::line(result, cv::Point(0, y), cv::Point(maxX - minX, y), cv::Scalar(255, 255, 255, 255), 3);
 		}
 		show(result);
 	}
@@ -224,7 +287,7 @@ void onMouse(int event, int x, int y, int flags, void* param)
         sprintf(text, "x=%d, y=%d", x, y);
 
 	cv::rectangle(img2, Rect(5, 20, 400, 100), CV_RGB(0,0,0), CV_FILLED);
-    cv::putText(img2, text, Point(5,40), FONT_HERSHEY_PLAIN, 1.8, CV_RGB(255,255,255), 1.8);
+    cv::putText(img2, text, Point(5,50), FONT_HERSHEY_PLAIN, 2.0, CV_RGB(255,255,255), 2.0);
     imshow(main_window, img2);
 }
 
