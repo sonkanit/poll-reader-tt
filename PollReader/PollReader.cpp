@@ -22,7 +22,7 @@ char* sourcePath;
 char* templatePath;
 char* resultPath;
 Mat src, gray, bw, rotated, cropped, eroded, result;
-int iThreshold = 100;
+int iThreshold = 150;
 const char* main_window = "Image";
 std::vector<cv::KeyPoint> keypoints;
 std::vector<float> area;
