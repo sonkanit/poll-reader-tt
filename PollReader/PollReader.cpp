@@ -4,10 +4,10 @@
 * @author OpenCV team
 */
 
-#include "opencv2/highgui/highgui.hpp"
-#include "opencv2/imgproc/imgproc.hpp"
-#include "opencv2/features2d.hpp"
-#include "opencv2/photo/photo.hpp"
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/features2d.hpp>
+#include <opencv2/photo/photo.hpp>
 #include <iostream>
 #include <fstream>
 #include <stdio.h>
@@ -43,63 +43,58 @@ bool sortLine(cv::Vec4f a, cv::Vec4f b)
 	return lengthSqrA > lengthSqrB;
 }
 
-/**
-* @function main
-*/
-int main(int argc, char** argv)
+int execute()
 {
-	if (argc < 4) 
-	{
-		cout<<"Usage: PollReader.exe SourcePath TemplatePath ResultPath [isInteractive]"<<endl;
-		return 0;
-	}
-
-	sourcePath = argv[1];
-	templatePath = argv[2];
-	resultPath = argv[3];
-	interactive = argc == 5 ? true: false;
-
-	/// Load Template
-	//loadTemplate();
-
-	/// Create Window
-	if (interactive)
-	{
-		namedWindow(main_window, WINDOW_NORMAL);
-	}
-
-	/// Load source image and convert it to gray
-	src = imread(sourcePath, 1);
 	cvtColor(src, gray, COLOR_BGR2GRAY);
+	show(src);
 
 	/// Detect Skew angle
 	cv::threshold(gray, bw, iThreshold, 255.0, THRESH_BINARY_INV);
-	std::vector<cv::Vec4f> lines, longLines;
+	std::vector<cv::Vec4i> lines, longLines;
 	cv::HoughLinesP(bw, lines, 1, CV_PI / 180, iThreshold, src.cols / 2, 30);
+	if (lines.empty())
+	{
+		return 0;
+	}
 	double angle = 0.0;
 	unsigned nb_lines = lines.size();
 	std::sort(lines.begin(), lines.end(), sortLine);
-	
+	int usedLines = nb_lines;
 	for (unsigned i = 0; i < nb_lines; ++i)
 	{
 		cv::Vec4f line = lines[i];
-		if (i < 40 && line[1] < 500)
+		if (i < 40 && line[1] < 550)
 		{
 			longLines.push_back(line);
 		}
 		cv::Scalar color = cv::Scalar(255, 0, 0);
 		cv::line(src, cv::Point(line[0], line[1]), cv::Point(line[2], line[3]), color);
-		angle += atan2((double)line[3] - line[1], (double)line[2] - line[0]);
+		double a = atan2((double)line[3] - line[1], (double)line[2] - line[0]);
+		if (a < 1.0 && a > -1) {
+			angle += a;
+		}
+		else {
+			usedLines--;
+		}
 	}
-	angle /= nb_lines; // mean angle, in radians.
+
+	if (longLines.empty())
+	{
+		return 1;
+	}
+	angle /= usedLines; // mean angle, in radians.
 	std::sort(longLines.begin(), longLines.end(), [](cv::Vec4f a, cv::Vec4f b)->bool {return a[1] < b[1]; });
 	cv::Vec4f theLine = longLines[longLines.size() / 2];
+	if (theLine[1] > 1000)
+	{
+		return 1;
+	}
 	cv::Scalar color = cv::Scalar(0, 0, 255);
 	cv::line(src, cv::Point(theLine[0], theLine[1]), cv::Point(theLine[2], theLine[3]), color, 5);
 	show(src);
 
 	/// Deskew
-	Mat rM = cv::getRotationMatrix2D(cv::Point2f(0, 0), angle/CV_PI*180.0, 1.0);
+	Mat rM = cv::getRotationMatrix2D(cv::Point2f(0, 0), angle / CV_PI*180.0, 1.0);
 	Mat rotated;
 	cv::warpAffine(bw, rotated, rM, cv::Size(src.cols, src.rows));
 	cv::warpAffine(gray, gray, rM, cv::Size(src.cols, src.rows));
@@ -108,7 +103,10 @@ int main(int argc, char** argv)
 	/// Calculate Cropping Area
 	vector<Vec3f> circles, choiceCircles;
 	GaussianBlur(gray, gray, Size(9, 9), 2, 2);
+	show(gray);
 	HoughCircles(gray, circles, CV_HOUGH_GRADIENT, 1, 10, 100, 40, 10, 20);
+	if (circles.empty())
+		return 0;
 	for (size_t i = 0; i < circles.size(); i++)
 	{
 		if (circles[i][1] > theLine[1] + 150)
@@ -153,6 +151,10 @@ int main(int argc, char** argv)
 	}
 
 	/// Crop
+	if (minX < 500)
+	{
+		return 1;
+	}
 	cv::Rect rect(minX, minY, maxX - minX, maxY - minY);
 	cropped = rotated(rect);
 	show(cropped);
@@ -160,11 +162,11 @@ int main(int argc, char** argv)
 	/// Erode
 	int dilate_size = 1;
 	int erode_size = 5;
-	Mat element = getStructuringElement(cv::MorphShapes::MORPH_RECT,
+	Mat element = getStructuringElement(cv::MORPH_RECT,
 		Size(2 * dilate_size + 1, 2 * dilate_size + 1),
 		Point(-1, -1));
 	cv::dilate(cropped, eroded, element);
-	element = getStructuringElement(cv::MorphShapes::MORPH_ELLIPSE,
+	element = getStructuringElement(cv::MORPH_ELLIPSE,
 		Size(2 * erode_size + 1, 2 * erode_size + 1),
 		Point(-1, -1));
 	show(eroded);
@@ -184,7 +186,7 @@ int main(int argc, char** argv)
 	params.maxArea = 800;
 	//params.minCircularity = 0.5;
 	//params.minThreshold = 120.0;
-	cv::Ptr<cv::SimpleBlobDetector> blobDetector = cv::SimpleBlobDetector::create(params);
+	cv::Ptr<cv::SimpleBlobDetector> blobDetector = new cv::SimpleBlobDetector(params);
 	blobDetector->detect(eroded, keypoints);
 
 	/// Draw Results
@@ -215,10 +217,44 @@ int main(int argc, char** argv)
 	report();
 	for (int i = 0; i < questions.size(); i++)
 	{
-		cout<<scores[i]<<" ";
+		cout << scores[i] << " ";
 	}
-	cout<<endl;
+	cout << endl;
+	return 0;
+}
 
+/**
+* @function main
+*/
+int main(int argc, char** argv)
+{
+	if (argc < 4) 
+	{
+		cout<<"Usage: PollReader.exe SourcePath TemplatePath ResultPath [isInteractive]"<<endl;
+		return 0;
+	}
+
+	sourcePath = argv[1];
+	templatePath = argv[2];
+	resultPath = argv[3];
+	interactive = argc == 5 ? true: false;
+
+	/// Load Template
+	//loadTemplate();
+
+	/// Create Window
+	if (interactive)
+	{
+		namedWindow(main_window, WINDOW_NORMAL);
+	}
+
+	/// Load source image and convert it to gray
+	src = imread(sourcePath, 1);
+	if (execute() > 0)
+	{
+		cv::flip(src, src, -1);
+		execute();
+	}
 	return(0);
 }
 
@@ -229,7 +265,15 @@ void report()
 
 	for (int i = 0; i < questions.size(); i++)
 	{
-		resultStream<<scores[i]<<",";
+		int score = scores[i] + 1;
+		if (score > 0) 
+		{
+			resultStream << scores[i] + 1 << ",";
+		}
+		else
+		{
+			resultStream << " ,";
+		}
 	}
 	resultStream<<endl;
 }
